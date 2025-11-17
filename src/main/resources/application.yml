@@ -44,8 +44,8 @@ management:
 markov:
   native:
     library-path: src/main/resources/native/libmarkovova.so
-    library-name: markov
-    fallback-enabled: true
+    library-name: markovova
+    fallback-enabled: false
     debug-mode: true
 
 logging:

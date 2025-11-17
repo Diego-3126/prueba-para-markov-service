@@ -28,6 +28,9 @@ public class MarkovNativeService {
     @Value("${markov.native.debug-mode:true}")
     private boolean debugMode;
 
+    private boolean modeloInicializado = false;
+    private int ordenModeloActual = -1;
+
 
     public interface MarkovLibrary extends Library {
         Pointer markov_create_model(int order);
@@ -84,39 +87,62 @@ public class MarkovNativeService {
     public void initializeModel(int order) {
         if (libraryLoaded && nativeLibrary != null) {
             try {
+                // ✅ SOLO inicializar si es diferente al orden actual
+                if (modeloInicializado && ordenModeloActual == order) {
+                    logger.debug("Modelo ya inicializado con orden {}. Saltando inicialización.", order);
+                    return;
+                }
+
+                // Liberar modelo anterior si existe
                 if (model != null) {
                     markov_free_model(model);
                 }
+
+                // Crear nuevo modelo
                 model = nativeLibrary.markov_create_model(order);
+                ordenModeloActual = order;
+                modeloInicializado = true;
+
                 logger.info("Modelo Markov inicializado con orden: {}", order);
             } catch (Exception e) {
                 logger.error("Error inicializando modelo Markov nativo", e);
+                modeloInicializado = false;
             }
         } else {
             logger.info("Modo simulación: Modelo Markov inicializado (orden {})", order);
+            modeloInicializado = true;
+            ordenModeloActual = order;
         }
     }
 
     public void trainModel(String trainingText) {
-        if (libraryLoaded && model != null && nativeLibrary != null) {
+        if (libraryLoaded && model != null && nativeLibrary != null && modeloInicializado) {
             try {
                 nativeLibrary.markov_train_model(model, trainingText);
                 logger.info("Modelo Markov entrenado con texto de longitud: {}", trainingText.length());
             } catch (Exception e) {
                 logger.error("Error entrenando modelo Markov", e);
             }
-        } else {
+        } else if (modeloInicializado) {
             logger.info("Modo simulación: Modelo entrenado con texto de {} caracteres", trainingText.length());
+        } else {
+            logger.warn("Intento de entrenar modelo no inicializado");
         }
     }
 
     public String generateText(int length, String startText) {
+        // ✅ VERIFICAR que el modelo esté listo
+        if (!modeloInicializado) {
+            logger.warn("Intento de generar texto con modelo no inicializado");
+            return "Error: Modelo no inicializado. Entrene un modelo primero.";
+        }
+
         if (libraryLoaded && model != null && nativeLibrary != null) {
             try {
                 String result = nativeLibrary.markov_generate_text(model, length, startText);
                 if (debugMode) {
-                    logger.debug("Texto generado ({} chars): {}",
-                            result != null ? result.length() : 0, result);
+                    logger.debug("Texto generado ({} chars) desde '{}': {}",
+                            result != null ? result.length() : 0, startText, result);
                 }
                 return result;
             } catch (Exception e) {
@@ -124,7 +150,7 @@ public class MarkovNativeService {
                 return "Error en generación: " + e.getMessage();
             }
         } else {
-            logger.info("Usando modo simulación para generación de texto");
+            logger.info("Usando modo simulación para generación de texto desde: '{}'", startText);
             return generateSimulatedText(length, startText);
         }
     }
@@ -161,6 +187,14 @@ public class MarkovNativeService {
             logger.debug("Texto simulado generado: {}", result);
         }
         return result;
+    }
+
+    public int getOrdenModeloActual() {
+        return ordenModeloActual;
+    }
+
+    public boolean isModeloListo() {
+        return modeloInicializado && (libraryLoaded ? model != null : true);
     }
 
     public boolean isNativeLibraryLoaded() {

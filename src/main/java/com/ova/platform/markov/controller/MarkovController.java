@@ -5,6 +5,8 @@ import com.ova.platform.markov.model.request.CreateModelRequest;
 import com.ova.platform.markov.model.request.MarkovGenerateRequest;
 import com.ova.platform.markov.model.response.MarkovGenerateResponse;
 import com.ova.platform.markov.model.response.ModelResponse;
+import com.ova.platform.markov.model.request.TrainModelRequest;
+import com.ova.platform.markov.model.response.TrainModelResponse;
 import com.ova.platform.markov.service.MarkovService;
 import com.ova.platform.markov.service.ModelService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -30,6 +32,32 @@ public class MarkovController {
 
     @Autowired
     private ModelService modelService;
+
+    // ✅ ENDPOINT NUEVO - HU-301: ENTRENAR MODELO
+    @PostMapping("/train")
+    @Operation(summary = "Entrenar modelo Markov",
+            description = "Entrena un modelo de Cadenas de Markov con texto personalizado. " +
+                    "Permite especificar el orden del modelo y recibe estadísticas del entrenamiento.")
+    public ResponseEntity<ApiResponse<TrainModelResponse>> entrenarModelo(
+            @Valid @RequestBody TrainModelRequest request) {
+
+        logger.info("Solicitud recibida para entrenar modelo - Orden: {}, Texto longitud: {}",
+                request.getOrden(), request.getTextoEntrenamiento().length());
+
+        TrainModelResponse result = markovService.entrenarModelo(request);
+
+        ApiResponse<TrainModelResponse> response;
+        if (result.isExito()) {
+            response = ApiResponse.success(result, result.getMensaje());
+            logger.info("Entrenamiento exitoso - Vocabulario: {} palabras, Estados: {}",
+                    result.getVocabularioSize(), result.getEstadosCount());
+        } else {
+            response = ApiResponse.error(result.getMensaje());
+            logger.warn("Entrenamiento fallido - Error: {}", result.getMensaje());
+        }
+
+        return ResponseEntity.ok(response);
+    }
 
     // ✅ ENDPOINT EXISTENTE - HU-302
     @PostMapping("/generate")
@@ -133,24 +161,39 @@ public class MarkovController {
         }
     }
 
+
     @GetMapping("/health")
     @Operation(summary = "Health check del servicio Markov")
     public ResponseEntity<ApiResponse<Object>> healthCheck() {
         boolean nativeActive = markovService.isNativeIntegrationActive();
+        boolean modeloEntrenado = markovService.isModeloEntrenado();
+        String infoModelo = markovService.getInfoModeloEntrenado();
+
+        // ✅ CORREGIDO: Usar variables locales en lugar de referencias a this
+        final boolean modeloEntrenadoFinal = modeloEntrenado;
+        final String infoModeloFinal = infoModelo;
 
         var healthInfo = new Object() {
             public final String status = "UP";
             public final String service = "markov-service";
             public final boolean nativeIntegration = nativeActive;
             public final String nativeStatus = nativeActive ? "ACTIVE" : "SIMULATION";
+            public final boolean modeloEntrenado = modeloEntrenadoFinal;  // ✅ Usar variable local
+            public final String infoModelo = infoModeloFinal;             // ✅ Usar variable local
             public final String timestamp = java.time.LocalDateTime.now().toString();
         };
 
-        ApiResponse<Object> response = ApiResponse.success(
-                healthInfo,
-                nativeActive ? "Servicio Markov operativo con librería nativa" : "Servicio Markov en modo simulación"
-        );
+        String mensaje = nativeActive ?
+                "Servicio Markov operativo con librería nativa" :
+                "Servicio Markov en modo simulación";
 
+        if (modeloEntrenado) {
+            mensaje += " | " + infoModelo;
+        } else {
+            mensaje += " | Sin modelo entrenado";
+        }
+
+        ApiResponse<Object> response = ApiResponse.success(healthInfo, mensaje);
         return ResponseEntity.ok(response);
     }
 }
